@@ -129,10 +129,11 @@ jobs:
           New-Item -ItemType Directory -Force infrastructure | Out-Null
           Invoke-WebRequest -Uri $mysqlUrl -OutFile $zipPath
           Expand-Archive -Path $zipPath -DestinationPath infrastructure -Force
-          $mysqlDir = Get-ChildItem infrastructure -Directory -Filter "mysql-*" | Select-Object -First 1
-          if (Test-Path infrastructure\mysql) { Remove-Item -Recurse -Force infrastructure\mysql }
-          Move-Item $mysqlDir.FullName infrastructure\mysql
           Remove-Item $zipPath
+          # Rename mysql-8.x-winx64 -> mysql (preserve my.ini from repo)
+          $mysqlDir = Get-ChildItem infrastructure -Directory -Filter "mysql-*" | Select-Object -First 1
+          Copy-Item -Recurse -Force "$mysqlDir\*" infrastructure\mysql\
+          Remove-Item -Recurse -Force $mysqlDir
 
       - name: Download Redis for Windows
         run: |
