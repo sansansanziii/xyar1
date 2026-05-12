@@ -1,0 +1,2 @@
+# 排除 Windows 平台加密产物（.pyd），避免被打进 Linux Docker 镜像
+*.pyd
