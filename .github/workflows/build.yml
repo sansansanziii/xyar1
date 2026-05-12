@@ -73,6 +73,8 @@ jobs:
             --include-package=redis `
             --include-package=pymysql `
             --include-package=aiohttp `
+            --include-package=http `
+            --include-package=http.server `
             --nofollow-import-to=test `
             --nofollow-import-to=docs `
             --nofollow-import-to=setuptools `
