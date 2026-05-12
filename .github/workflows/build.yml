@@ -26,6 +26,10 @@ jobs:
       - name: Install Nuitka & dependencies
         run: pip install nuitka ordered-set zstandard
 
+      - name: Install project dependencies
+        run: |
+          pip install playwright uvicorn fastapi sqlalchemy pydantic pydantic-settings email-validator asyncmy pymysql redis aiohttp aiohttp-socks httpx loguru passlib python-jose[cryptography] pycryptodome websockets python-multipart Pillow anyio starlette click h11 sniffio idna certifi python-dateutil apscheduler python-socks[asyncio] requests qrcode openai bcrypt tk
+
       - name: Read version
         id: version
         shell: pwsh
