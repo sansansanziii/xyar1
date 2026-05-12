@@ -28,13 +28,10 @@ jobs:
 
       - name: Read version
         id: version
-        shell: python
+        shell: pwsh
         run: |
-          from launcher.version import CURRENT_VERSION
-          print(f"version={CURRENT_VERSION}")
-          import os
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"version={CURRENT_VERSION}\n")
+          $ver = python -c "from launcher.version import CURRENT_VERSION; print(CURRENT_VERSION)"
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
 
       # ---------- Frontend ----------
       - name: Build main frontend
