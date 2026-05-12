@@ -1,0 +1,267 @@
+name: Build EXE
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install Nuitka & dependencies
+        run: pip install nuitka ordered-set zstandard
+
+      - name: Read version
+        id: version
+        shell: python
+        run: |
+          from launcher.version import CURRENT_VERSION
+          print(f"version={CURRENT_VERSION}")
+          import os
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version={CURRENT_VERSION}\n")
+
+      # ---------- Frontend ----------
+      - name: Build main frontend
+        run: |
+          cd frontend
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build promotion frontend
+        if: hashFiles('promotion/frontend/package.json') != ''
+        run: |
+          cd promotion/frontend
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # ---------- Nuitka ----------
+      - name: Compile launcher with Nuitka
+        env:
+          VSLANG: "1033"
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python -m nuitka `
+            --standalone `
+            --windows-console-mode=disable `
+            --windows-company-name=XianyuAutoReply `
+            --windows-product-name=XianyuAutoReply `
+            --windows-product-version="${{ steps.version.outputs.version }}.0" `
+            --windows-file-version="${{ steps.version.outputs.version }}.0" `
+            --output-filename=XianyuAutoReply.exe `
+            --output-dir=build_output `
+            --include-package=launcher `
+            --include-package=common `
+            --include-package=playwright `
+            --include-package-data=playwright `
+            --include-package=uvicorn `
+            --include-package=fastapi `
+            --include-package=sqlalchemy `
+            --include-package=pydantic `
+            --include-package=pydantic_settings `
+            --include-package=email_validator `
+            --include-package=asyncmy `
+            --include-package=pymysql `
+            --include-package=redis `
+            --include-package=aiohttp `
+            --include-package=aiohttp_socks `
+            --include-package=httpx `
+            --include-package=httpcore `
+            --include-package=loguru `
+            --include-package=passlib `
+            --include-package=jose `
+            --include-package=Crypto `
+            --include-package=websockets `
+            --include-package=multipart `
+            --include-package=PIL `
+            --include-package=anyio `
+            --include-package=starlette `
+            --include-package=click `
+            --include-package=h11 `
+            --include-package=sniffio `
+            --include-package=idna `
+            --include-package=certifi `
+            --include-package=dateutil `
+            --include-package=apscheduler `
+            --include-package=python_socks `
+            --include-package=requests `
+            --include-package=qrcode `
+            --include-package=openai `
+            --include-package=bcrypt `
+            --nofollow-import-to=test `
+            --nofollow-import-to=docs `
+            --nofollow-import-to=setuptools `
+            --nofollow-import-to=pip `
+            --nofollow-import-to=wheel `
+            --nofollow-import-to=nuitka `
+            --include-module=tkinter.ttk `
+            --include-module=tkinter.messagebox `
+            --enable-plugin=tk-inter `
+            --assume-yes-for-downloads launcher\main.py
+
+      # ---------- Assemble ----------
+      - name: Copy project files
+        run: |
+          $dist = "build_output\main.dist"
+
+          # Backend services & shared modules
+          Copy-Item -Recurse -Force backend-web $dist\backend-web
+          Copy-Item -Recurse -Force websocket  $dist\websocket
+          Copy-Item -Recurse -Force scheduler  $dist\scheduler
+          Copy-Item -Recurse -Force common     $dist\common
+          Copy-Item -Recurse -Force frontend\dist $dist\frontend\dist
+
+          # Launcher plain .py files (needed by .pyd imports)
+          New-Item -ItemType Directory -Force $dist\launcher | Out-Null
+          Copy-Item -Force launcher\__init__.py $dist\launcher\__init__.py
+          Copy-Item -Force launcher\version.py   $dist\launcher\version.py
+
+          # Promotion module
+          if (Test-Path promotion\frontend\dist\index.html) {
+            Copy-Item -Recurse -Force promotion\backend  $dist\promotion\backend
+            Copy-Item -Recurse -Force promotion\frontend\dist $dist\promotion\frontend\dist
+          }
+
+          # Python exe (for Playwright fallback)
+          Copy-Item -Force (Get-Command python.exe).Path $dist\python.exe
+          Copy-Item -Force (Get-Command pythonw.exe).Path $dist\pythonw.exe -ErrorAction SilentlyContinue
+
+          # Python standard library
+          $pyDir = Split-Path (Get-Command python.exe).Path -Parent
+          if (Test-Path $pyDir\Lib) {
+            Copy-Item -Recurse -Force $pyDir\Lib $dist\Lib
+          }
+
+      - name: Install & copy Playwright Chromium
+        run: |
+          $dist = "build_output\main.dist"
+          python -m playwright install chromium
+          $localCache = "$env:LOCALAPPDATA\ms-playwright"
+          Copy-Item -Recurse -Force $localCache $dist\ms-playwright
+
+      # ---------- Embedded MySQL + Redis ----------
+      - name: Download MySQL 8.0 portable
+        run: |
+          $mysqlUrl = "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.42-winx64.zip"
+          $zipPath = "infrastructure\mysql-portable.zip"
+          New-Item -ItemType Directory -Force infrastructure | Out-Null
+          Invoke-WebRequest -Uri $mysqlUrl -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath infrastructure -Force
+          # Rename mysql-8.x-winx64 -> mysql
+          $mysqlDir = Get-ChildItem infrastructure -Directory -Filter "mysql-*" | Select-Object -First 1
+          if (Test-Path infrastructure\mysql) { Remove-Item -Recurse -Force infrastructure\mysql }
+          Move-Item $mysqlDir.FullName infrastructure\mysql
+          Remove-Item $zipPath
+
+      - name: Download Redis for Windows
+        run: |
+          $redisUrl = "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip"
+          $zipPath = "infrastructure\redis-portable.zip"
+          New-Item -ItemType Directory -Force infrastructure\redis | Out-Null
+          Invoke-WebRequest -Uri $redisUrl -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath infrastructure\redis -Force
+          Remove-Item $zipPath
+
+      - name: Copy infrastructure to dist
+        run: |
+          $dist = "build_output\main.dist"
+          # MySQL (bin, share, lib, my.ini — skip data)
+          Copy-Item -Recurse -Force infrastructure\mysql\bin  $dist\infrastructure\mysql\bin
+          if (Test-Path infrastructure\mysql\share) { Copy-Item -Recurse -Force infrastructure\mysql\share $dist\infrastructure\mysql\share }
+          if (Test-Path infrastructure\mysql\lib)   { Copy-Item -Recurse -Force infrastructure\mysql\lib   $dist\infrastructure\mysql\lib }
+          Copy-Item -Force infrastructure\mysql\my.ini $dist\infrastructure\mysql\my.ini
+          # Redis (all files — skip data files if present)
+          Copy-Item -Recurse -Force infrastructure\redis $dist\infrastructure\redis
+          Get-ChildItem $dist\infrastructure\redis -Filter "*.aof" -ErrorAction SilentlyContinue | Remove-Item -Force
+          Get-ChildItem $dist\infrastructure\redis -Filter "*.rdb" -ErrorAction SilentlyContinue | Remove-Item -Force
+          # Startup scripts
+          Copy-Item -Force start.bat $dist\start.bat
+          Copy-Item -Force stop.bat  $dist\stop.bat
+          New-Item -ItemType Directory -Force $dist\scripts | Out-Null
+          Copy-Item -Force scripts\setup_embedded.py $dist\scripts\setup_embedded.py
+
+      # ---------- Cleanup ----------
+      - name: Clean sensitive files
+        run: |
+          $dist = "build_output\main.dist"
+          foreach ($svc in @("backend-web", "websocket", "scheduler")) {
+            Remove-Item -Recurse -Force "$dist\$svc\logs"          -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\$svc\.env"                   -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\$svc\.env.example"           -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\$svc\pyproject.toml"         -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$dist\$svc\static\uploads" -ErrorAction SilentlyContinue
+          }
+          Remove-Item -Recurse -Force "$dist\websocket\browser_data" -ErrorAction SilentlyContinue
+
+          # Promotion cleanup
+          if (Test-Path "$dist\promotion") {
+            Remove-Item -Recurse -Force "$dist\promotion\backend\logs"          -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\promotion\backend\.env"                   -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\promotion\backend\.env.example"           -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\promotion\backend\pyproject.toml"         -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$dist\promotion\backend\static\uploads" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$dist\promotion\frontend\src"          -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$dist\promotion\frontend\node_modules" -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\promotion\frontend\package.json"          -ErrorAction SilentlyContinue
+            Remove-Item -Force "$dist\promotion\frontend\package-lock.json"     -ErrorAction SilentlyContinue
+          }
+
+          # Clean caches & Linux binaries
+          foreach ($d in @("$dist\backend-web", "$dist\websocket", "$dist\scheduler", "$dist\common")) {
+            Get-ChildItem -Recurse -Directory -Filter "__pycache__" $d | Remove-Item -Recurse -Force
+            Get-ChildItem -Recurse -Filter "*.pyc" $d | Remove-Item -Force
+            Get-ChildItem -Recurse -Filter "*.pyo" $d | Remove-Item -Force
+            Get-ChildItem -Recurse -Filter "*.so"  $d | Remove-Item -Force
+            Remove-Item -Recurse -Force "$d\.pytest_cache" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$d\.mypy_cache"   -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$d\temp"           -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force "$d\tmp"            -ErrorAction SilentlyContinue
+          }
+
+      # ---------- Package ----------
+      - name: Create release package
+        run: |
+          $ver = "${{ steps.version.outputs.version }}"
+          $releaseDir = "release\XianyuAutoReply"
+          New-Item -ItemType Directory -Force $releaseDir | Out-Null
+          Copy-Item -Recurse -Force build_output\main.dist\* $releaseDir
+          New-Item -ItemType Directory -Force "$releaseDir\logs" | Out-Null
+          Remove-Item -Recurse -Force "$releaseDir\data" -ErrorAction SilentlyContinue
+
+          # Verify EXE exists
+          if (-not (Test-Path "$releaseDir\XianyuAutoReply.exe")) {
+            Write-Error "XianyuAutoReply.exe not found!"
+            exit 1
+          }
+
+          # Create zip
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath "release\app-v$ver.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XianyuAutoReply-v${{ steps.version.outputs.version }}
+          path: release\app-v${{ steps.version.outputs.version }}.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release\app-v${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
