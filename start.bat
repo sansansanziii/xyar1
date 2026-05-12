@@ -3,6 +3,9 @@ setlocal EnableDelayedExpansion
 chcp 65001 >nul
 cd /d "%~dp0"
 
+REM --- 设置 Playwright 浏览器路径 ---
+set "PLAYWRIGHT_BROWSERS_PATH=%~dp0ms-playwright"
+
 echo ============================================
 echo   闲鱼自动回复 - 一键启动
 echo ============================================
