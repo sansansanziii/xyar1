@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -23,12 +23,10 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Install Nuitka & dependencies
-        run: pip install nuitka ordered-set zstandard
-
-      - name: Install project dependencies
+      - name: Install Python dependencies
         run: |
-          pip install playwright uvicorn fastapi sqlalchemy pydantic pydantic-settings email-validator asyncmy pymysql redis aiohttp aiohttp-socks httpx loguru passlib python-jose[cryptography] pycryptodome websockets python-multipart Pillow anyio starlette click h11 sniffio idna certifi python-dateutil apscheduler python-socks[asyncio] requests qrcode openai bcrypt tk
+          pip install nuitka ordered-set zstandard
+          pip install loguru redis pymysql aiohttp playwright tk
 
       - name: Read version
         id: version
@@ -51,7 +49,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      # ---------- Nuitka ----------
+      # ---------- Nuitka (only compile launcher) ----------
       - name: Compile launcher with Nuitka
         env:
           VSLANG: "1033"
@@ -68,49 +66,23 @@ jobs:
             --output-filename=XianyuAutoReply.exe `
             --output-dir=build_output `
             --include-package=launcher `
-            --include-package=common `
-            --include-package=playwright `
-            --include-package-data=playwright `
-            --include-package=uvicorn `
-            --include-package=fastapi `
-            --include-package=sqlalchemy `
-            --include-package=pydantic `
-            --include-package=pydantic_settings `
-            --include-package=email_validator `
-            --include-package=asyncmy `
-            --include-package=pymysql `
-            --include-package=redis `
-            --include-package=aiohttp `
-            --include-package=aiohttp_socks `
-            --include-package=httpx `
-            --include-package=httpcore `
             --include-package=loguru `
-            --include-package=passlib `
-            --include-package=jose `
-            --include-package=Crypto `
-            --include-package=websockets `
-            --include-package=multipart `
-            --include-package=PIL `
-            --include-package=anyio `
-            --include-package=starlette `
-            --include-package=click `
-            --include-package=h11 `
-            --include-package=sniffio `
-            --include-package=idna `
-            --include-package=certifi `
-            --include-package=dateutil `
-            --include-package=apscheduler `
-            --include-package=python_socks `
-            --include-package=requests `
-            --include-package=qrcode `
-            --include-package=openai `
-            --include-package=bcrypt `
+            --include-package=redis `
+            --include-package=pymysql `
+            --include-package=aiohttp `
             --nofollow-import-to=test `
             --nofollow-import-to=docs `
             --nofollow-import-to=setuptools `
             --nofollow-import-to=pip `
             --nofollow-import-to=wheel `
             --nofollow-import-to=nuitka `
+            --nofollow-import-to=playwright `
+            --nofollow-import-to=fastapi `
+            --nofollow-import-to=sqlalchemy `
+            --nofollow-import-to=uvicorn `
+            --nofollow-import-to=pydantic `
+            --nofollow-import-to=openai `
+            --nofollow-import-to=celery `
             --include-module=tkinter.ttk `
             --include-module=tkinter.messagebox `
             --enable-plugin=tk-inter `
@@ -120,30 +92,24 @@ jobs:
       - name: Copy project files
         run: |
           $dist = "build_output\main.dist"
-
-          # Backend services & shared modules
           Copy-Item -Recurse -Force backend-web $dist\backend-web
           Copy-Item -Recurse -Force websocket  $dist\websocket
           Copy-Item -Recurse -Force scheduler  $dist\scheduler
           Copy-Item -Recurse -Force common     $dist\common
           Copy-Item -Recurse -Force frontend\dist $dist\frontend\dist
 
-          # Launcher plain .py files (needed by .pyd imports)
           New-Item -ItemType Directory -Force $dist\launcher | Out-Null
           Copy-Item -Force launcher\__init__.py $dist\launcher\__init__.py
           Copy-Item -Force launcher\version.py   $dist\launcher\version.py
 
-          # Promotion module
           if (Test-Path promotion\frontend\dist\index.html) {
             Copy-Item -Recurse -Force promotion\backend  $dist\promotion\backend
             Copy-Item -Recurse -Force promotion\frontend\dist $dist\promotion\frontend\dist
           }
 
-          # Python exe (for Playwright fallback)
           Copy-Item -Force (Get-Command python.exe).Path $dist\python.exe
           Copy-Item -Force (Get-Command pythonw.exe).Path $dist\pythonw.exe -ErrorAction SilentlyContinue
 
-          # Python standard library
           $pyDir = Split-Path (Get-Command python.exe).Path -Parent
           if (Test-Path $pyDir\Lib) {
             Copy-Item -Recurse -Force $pyDir\Lib $dist\Lib
@@ -153,18 +119,16 @@ jobs:
         run: |
           $dist = "build_output\main.dist"
           python -m playwright install chromium
-          $localCache = "$env:LOCALAPPDATA\ms-playwright"
-          Copy-Item -Recurse -Force $localCache $dist\ms-playwright
+          Copy-Item -Recurse -Force "$env:LOCALAPPDATA\ms-playwright" $dist\ms-playwright
 
       # ---------- Embedded MySQL + Redis ----------
       - name: Download MySQL 8.0 portable
         run: |
-          $mysqlUrl = "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.42-winx64.zip"
+          $mysqlUrl = "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.46-winx64.zip"
           $zipPath = "infrastructure\mysql-portable.zip"
           New-Item -ItemType Directory -Force infrastructure | Out-Null
           Invoke-WebRequest -Uri $mysqlUrl -OutFile $zipPath
           Expand-Archive -Path $zipPath -DestinationPath infrastructure -Force
-          # Rename mysql-8.x-winx64 -> mysql
           $mysqlDir = Get-ChildItem infrastructure -Directory -Filter "mysql-*" | Select-Object -First 1
           if (Test-Path infrastructure\mysql) { Remove-Item -Recurse -Force infrastructure\mysql }
           Move-Item $mysqlDir.FullName infrastructure\mysql
@@ -182,16 +146,13 @@ jobs:
       - name: Copy infrastructure to dist
         run: |
           $dist = "build_output\main.dist"
-          # MySQL (bin, share, lib, my.ini — skip data)
           Copy-Item -Recurse -Force infrastructure\mysql\bin  $dist\infrastructure\mysql\bin
           if (Test-Path infrastructure\mysql\share) { Copy-Item -Recurse -Force infrastructure\mysql\share $dist\infrastructure\mysql\share }
           if (Test-Path infrastructure\mysql\lib)   { Copy-Item -Recurse -Force infrastructure\mysql\lib   $dist\infrastructure\mysql\lib }
           Copy-Item -Force infrastructure\mysql\my.ini $dist\infrastructure\mysql\my.ini
-          # Redis (all files — skip data files if present)
           Copy-Item -Recurse -Force infrastructure\redis $dist\infrastructure\redis
           Get-ChildItem $dist\infrastructure\redis -Filter "*.aof" -ErrorAction SilentlyContinue | Remove-Item -Force
           Get-ChildItem $dist\infrastructure\redis -Filter "*.rdb" -ErrorAction SilentlyContinue | Remove-Item -Force
-          # Startup scripts
           Copy-Item -Force start.bat $dist\start.bat
           Copy-Item -Force stop.bat  $dist\stop.bat
           New-Item -ItemType Directory -Force $dist\scripts | Out-Null
@@ -209,8 +170,6 @@ jobs:
             Remove-Item -Recurse -Force "$dist\$svc\static\uploads" -ErrorAction SilentlyContinue
           }
           Remove-Item -Recurse -Force "$dist\websocket\browser_data" -ErrorAction SilentlyContinue
-
-          # Promotion cleanup
           if (Test-Path "$dist\promotion") {
             Remove-Item -Recurse -Force "$dist\promotion\backend\logs"          -ErrorAction SilentlyContinue
             Remove-Item -Force "$dist\promotion\backend\.env"                   -ErrorAction SilentlyContinue
@@ -222,8 +181,6 @@ jobs:
             Remove-Item -Force "$dist\promotion\frontend\package.json"          -ErrorAction SilentlyContinue
             Remove-Item -Force "$dist\promotion\frontend\package-lock.json"     -ErrorAction SilentlyContinue
           }
-
-          # Clean caches & Linux binaries
           foreach ($d in @("$dist\backend-web", "$dist\websocket", "$dist\scheduler", "$dist\common")) {
             Get-ChildItem -Recurse -Directory -Filter "__pycache__" $d | Remove-Item -Recurse -Force
             Get-ChildItem -Recurse -Filter "*.pyc" $d | Remove-Item -Force
@@ -244,14 +201,10 @@ jobs:
           Copy-Item -Recurse -Force build_output\main.dist\* $releaseDir
           New-Item -ItemType Directory -Force "$releaseDir\logs" | Out-Null
           Remove-Item -Recurse -Force "$releaseDir\data" -ErrorAction SilentlyContinue
-
-          # Verify EXE exists
           if (-not (Test-Path "$releaseDir\XianyuAutoReply.exe")) {
             Write-Error "XianyuAutoReply.exe not found!"
             exit 1
           }
-
-          # Create zip
           Compress-Archive -Path "$releaseDir\*" -DestinationPath "release\app-v$ver.zip" -Force
 
       - name: Upload artifact
