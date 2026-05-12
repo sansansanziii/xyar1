@@ -38,6 +38,24 @@ def wait_for_port(host: str, port: int, name: str, timeout: int = MAX_WAIT) -> b
     return False
 
 
+def _mysql_connect():
+    """尝试连接 MySQL，优先 TCP，失败则用 named pipe"""
+    import pymysql
+    for host in [MYSQL_HOST, "."]:
+        try:
+            conn = pymysql.connect(
+                host=host,
+                port=MYSQL_PORT,
+                user=MYSQL_USER,
+                password=MYSQL_PASSWORD,
+                charset="utf8mb4",
+            )
+            return conn
+        except Exception:
+            continue
+    return None
+
+
 def create_database() -> bool:
     """创建数据库（如果不存在）"""
     try:
@@ -48,13 +66,9 @@ def create_database() -> bool:
 
     for attempt in range(3):
         try:
-            conn = pymysql.connect(
-                host=MYSQL_HOST,
-                port=MYSQL_PORT,
-                user=MYSQL_USER,
-                password=MYSQL_PASSWORD,
-                charset="utf8mb4",
-            )
+            conn = _mysql_connect()
+            if conn is None:
+                raise RuntimeError("无法连接 MySQL")
             with conn.cursor() as cur:
                 cur.execute(
                     f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DATABASE}` "

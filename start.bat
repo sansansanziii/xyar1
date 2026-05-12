@@ -101,6 +101,13 @@ REM =============================================
 REM 4. 初始化数据库 + 配置 + 启动主程序
 REM =============================================
 echo [4/4] 初始化环境并启动主程序...
+
+REM --- 授权 root 用户通过 TCP 连接（initialize-insecure 只创建 named pipe 权限）---
+"%MYSQL_DIR%\bin\mysql.exe" -u root --skip-password --host=. -e "CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION; FLUSH PRIVILEGES;" 2>nul
+if errorlevel 1 (
+    echo [警告] MySQL 用户授权失败，尝试跳过...
+)
+
 python scripts\setup_embedded.py
 if errorlevel 1 (
     echo [警告] 环境初始化出现问题，继续启动主程序...
