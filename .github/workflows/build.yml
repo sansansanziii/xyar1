@@ -29,7 +29,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install nuitka ordered-set zstandard
-          pip install loguru redis pymysql aiohttp playwright tk
+          pip install playwright uvicorn fastapi sqlalchemy pydantic pydantic-settings email-validator asyncmy pymysql redis aiohttp aiohttp-socks httpx loguru passlib python-jose[cryptography] pycryptodome websockets python-multipart Pillow anyio starlette click h11 sniffio idna certifi python-dateutil apscheduler python-socks[asyncio] requests qrcode openai bcrypt
 
       - name: Read version
         id: version
@@ -52,7 +52,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      # ---------- Nuitka (only compile launcher) ----------
+      # ---------- Nuitka ----------
       - name: Compile launcher with Nuitka
         env:
           VSLANG: "1033"
@@ -69,25 +69,50 @@ jobs:
             --output-filename=XianyuAutoReply.exe `
             --output-dir=build_output `
             --include-package=launcher `
-            --include-package=loguru `
-            --include-package=redis `
+            --include-package=common `
+            --include-package=playwright `
+            --include-package-data=playwright `
+            --include-package=uvicorn `
+            --include-package=fastapi `
+            --include-package=sqlalchemy `
+            --include-package=pydantic `
+            --include-package=pydantic_settings `
+            --include-package=email_validator `
+            --include-package=asyncmy `
             --include-package=pymysql `
+            --include-package=redis `
             --include-package=aiohttp `
+            --include-package=aiohttp_socks `
+            --include-package=httpx `
+            --include-package=httpcore `
+            --include-package=loguru `
+            --include-package=passlib `
+            --include-package=jose `
+            --include-package=Crypto `
+            --include-package=websockets `
+            --include-package=multipart `
+            --include-package=PIL `
+            --include-package=anyio `
+            --include-package=starlette `
+            --include-package=click `
+            --include-package=h11 `
+            --include-package=sniffio `
+            --include-package=idna `
+            --include-package=certifi `
+            --include-package=dateutil `
+            --include-package=apscheduler `
+            --include-package=python_socks `
+            --include-package=requests `
+            --include-package=qrcode `
+            --include-package=openai `
+            --include-package=bcrypt `
             --include-package=http `
-            --include-package=http.server `
             --nofollow-import-to=test `
             --nofollow-import-to=docs `
             --nofollow-import-to=setuptools `
             --nofollow-import-to=pip `
             --nofollow-import-to=wheel `
             --nofollow-import-to=nuitka `
-            --nofollow-import-to=playwright `
-            --nofollow-import-to=fastapi `
-            --nofollow-import-to=sqlalchemy `
-            --nofollow-import-to=uvicorn `
-            --nofollow-import-to=pydantic `
-            --nofollow-import-to=openai `
-            --nofollow-import-to=celery `
             --include-module=tkinter.ttk `
             --include-module=tkinter.messagebox `
             --enable-plugin=tk-inter `
