@@ -1,10 +1,9 @@
 """
 嵌入式环境初始化脚本。
 在 start.bat 中调用，负责：
-1. 等待 MySQL 就绪
+1. 等待 MySQL/Redis 就绪
 2. 创建 xianyu_data 数据库
-3. 预填充 launcher 的连接配置
-4. 生成各服务的 .env 文件
+3. 生成各服务的 .env 文件
 """
 import socket
 import sys
@@ -26,7 +25,6 @@ MAX_WAIT = 30
 
 
 def wait_for_port(host: str, port: int, name: str, timeout: int = MAX_WAIT) -> bool:
-    """轮询等待端口可用"""
     for i in range(timeout):
         try:
             with socket.create_connection((host, port), timeout=1):
@@ -39,7 +37,6 @@ def wait_for_port(host: str, port: int, name: str, timeout: int = MAX_WAIT) -> b
 
 
 def _mysql_connect():
-    """尝试连接 MySQL，优先 TCP，失败则用 named pipe"""
     import pymysql
     for host in [MYSQL_HOST, "."]:
         try:
@@ -57,7 +54,6 @@ def _mysql_connect():
 
 
 def create_database() -> bool:
-    """创建数据库（如果不存在）"""
     try:
         import pymysql
     except ImportError:
@@ -88,53 +84,9 @@ def create_database() -> bool:
     return False
 
 
-def save_config() -> bool:
-    """预填充 launcher 的连接配置并生成 .env 文件"""
+def generate_env_files() -> bool:
+    """直接生成各服务的 .env 文件"""
     project_root = Path(__file__).parent.parent
-    sys.path.insert(0, str(project_root))
-
-    try:
-        from launcher.config_store import save_connection_config
-    except ImportError:
-        print("[setup][WARN] 无法导入 config_store，跳过配置预填充")
-        return _generate_env_files_fallback(project_root)
-
-    config = {
-        "mysql": {
-            "host": MYSQL_HOST,
-            "port": str(MYSQL_PORT),
-            "user": MYSQL_USER,
-            "password": MYSQL_PASSWORD,
-            "database": MYSQL_DATABASE,
-        },
-        "redis": {
-            "host": REDIS_HOST,
-            "port": str(REDIS_PORT),
-            "password": REDIS_PASSWORD,
-            "db": str(REDIS_DB),
-        },
-    }
-
-    try:
-        save_connection_config(config)
-        print("[setup] 连接配置已保存")
-    except Exception as e:
-        print(f"[setup][WARN] 保存连接配置失败: {e}")
-
-    # 尝试通过 service_manager 生成 .env
-    try:
-        from launcher.service_manager import ServiceManager
-        sm = ServiceManager()
-        sm.generate_env_files()
-        print("[setup] .env 文件已生成")
-        return True
-    except Exception as e:
-        print(f"[setup][WARN] ServiceManager 生成 .env 失败: {e}")
-        return _generate_env_files_fallback(project_root)
-
-
-def _generate_env_files_fallback(project_root: Path) -> bool:
-    """直接生成 .env 文件（fallback）"""
     ok = True
     for service_dir_name in ("backend-web", "websocket", "scheduler"):
         env_path = project_root / service_dir_name / ".env"
@@ -149,7 +101,6 @@ def _generate_env_files_fallback(project_root: Path) -> bool:
 
 
 def _build_env_content(service_dir_name: str) -> str:
-    """构建 .env 文件内容"""
     base = f"""\
 ENVIRONMENT=production
 LOG_LEVEL=INFO
@@ -220,7 +171,7 @@ def main() -> int:
     if not create_database():
         return 1
 
-    save_config()
+    generate_env_files()
 
     print("[setup] 初始化完成")
     return 0
