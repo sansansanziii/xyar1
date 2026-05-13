@@ -70,23 +70,33 @@ jobs:
       - name: Copy Python runtime
         run: |
           $dist = "release\XianyuAutoReply"
-          Copy-Item -Force (Get-Command python.exe).Path $dist\python.exe
-          Copy-Item -Force (Get-Command pythonw.exe).Path $dist\pythonw.exe -ErrorAction SilentlyContinue
-
           $pyDir = Split-Path (Get-Command python.exe).Path -Parent
-          if (Test-Path $pyDir\Lib) {
-            Copy-Item -Recurse -Force $pyDir\Lib $dist\Lib
-          }
+          # Copy entire Python installation (exe, DLLs, Lib, site-packages)
+          Copy-Item -Force "$pyDir\python.exe" $dist\python.exe
+          Copy-Item -Force "$pyDir\pythonw.exe" $dist\pythonw.exe -ErrorAction SilentlyContinue
+          Copy-Item -Force "$pyDir\*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "$pyDir\Lib" $dist\Lib
+          Copy-Item -Recurse -Force "$pyDir\Scripts" $dist\Scripts -ErrorAction SilentlyContinue
+          # Remove unnecessary files to save space
+          Remove-Item -Recurse -Force "$dist\Lib\test" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$dist\Lib\unittest" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$dist\Lib\idlelib" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$dist\Lib\pydoc_data" -ErrorAction SilentlyContinue
 
-      - name: Install Python deps into dist
+      - name: Install Python dependencies
         run: |
           $dist = "release\XianyuAutoReply"
-          & $dist\python.exe -m pip install --target "$dist\site-packages" `
+          & $dist\python.exe -m pip install `
             fastapi uvicorn sqlalchemy pydantic pydantic-settings email-validator `
             asyncmy pymysql redis aiohttp aiohttp-socks httpx loguru `
             passlib python-jose[cryptography] pycryptodome websockets python-multipart `
             Pillow anyio starlette click h11 sniffio idna certifi python-dateutil `
-            apscheduler python-socks[asyncio] requests qrcode openai bcrypt playwright
+            apscheduler python-socks[asyncio] requests qrcode openai bcrypt playwright pymysql
+
+      - name: Verify Python can import packages
+        run: |
+          $dist = "release\XianyuAutoReply"
+          & $dist\python.exe -c "import fastapi, sqlalchemy, redis, aiohttp, loguru, pymysql; print('All imports OK')"
 
       - name: Install & copy Playwright Chromium
         run: |
